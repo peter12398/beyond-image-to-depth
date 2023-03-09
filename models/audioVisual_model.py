@@ -14,27 +14,44 @@ class AudioVisualModel(torch.nn.Module):
         super(AudioVisualModel, self).__init__()
         self.opt = opt
         #initialize model
-        self.net_rgbdepth, self.net_audio, self.net_attention, self.net_material = nets
+        self.net_rgbspec, self.net_depthspec, self.net_attention, self.net_material = nets
         
 
     def forward(self, input, volatile=False):
         rgb_input = input['img']
+        #audio_input = input['audio']/input['audio'].max()
         audio_input = input['audio']
         depth_gt = input['depth']
 
-        audio_depth, audio_feat = self.net_audio(audio_input)
-        img_depth, img_feat = self.net_rgbdepth(rgb_input)
-        material_class, material_feat = self.net_material(rgb_input)
-        audio_feat = audio_feat.repeat(1, 1, img_feat.shape[-2], img_feat.shape[-1]) #tile audio feature
-        alpha, _ = self.net_attention(img_feat, audio_feat, material_feat)
-        depth_prediction = ((alpha*audio_depth)+((1-alpha)*img_depth)) 
+        #print("audio_input shape",audio_input.shape)
+        depth_spec, depth_feat = self.net_depthspec(depth_gt) # torch.Size([256, 2, 257, 166])  torch.Size([256, 512, 1, 1])
+        img_spec, img_feat = self.net_rgbspec(rgb_input) # torch.Size([256, 1, 128, 128]) torch.Size([256, 512, 4, 4])
+        
+        material_class, material_feat = self.net_material(rgb_input) 
+        material_feat = material_feat.unsqueeze(-1).unsqueeze(-1)
+        #alpha_rgb, _ = self.attentionRGBSpecNet(img_feat,material_feat)
+        #alpha_depth, _ = self.attentionDepthSpecNet(depth_feat,material_feat)
+        #img_spec, img_feat = self.net_rgbmaterial(rgb_input,material_feat)
+        #audio_feat = audio_feat.repeat(1, 1, img_feat.shape[-2], img_feat.shape[-1]) #tile audio feature
+        
+        #alpha, _ = self.net_attention(img_feat, depth_feat, material_feat)
+        alpha, _ = self.net_attention(img_feat, depth_feat, material_feat)
+        #spec_prediction = depth_spec #((alpha*img_spec)+((1-alpha)*depth_spec)) 
+        spec_prediction = alpha
+        #spec_prediction = ((alpha_rgb*img_spec)+((alpha_depth)*depth_spec)) 
+        #spec_prediction = depth_spec
+        #print("spec_prediction max:",spec_prediction.max())
+        #print("spec_prediction min:",spec_prediction.min())
+        #print("audio_input max:",audio_input.max())
+        #print("audio_input min:",audio_input.min())
 
         
-        output =  {'img_depth': img_depth * self.opt.max_depth,
-                    'audio_depth': audio_depth * self.opt.max_depth,
-                    'depth_predicted': depth_prediction * self.opt.max_depth, 
+        output =  {'img_spec': img_spec ,
+                    'depth_spec': depth_spec ,
+                    'spec_predicted': spec_prediction , 
                     'attention': alpha,
                     'img': rgb_input,
-                    'audio': audio_input,
-                    'depth_gt': depth_gt}
+                    'spec_gt': audio_input,
+                    'depth': depth_gt}
         return output
+

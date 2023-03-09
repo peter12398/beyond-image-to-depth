@@ -8,8 +8,8 @@ class TrainOptions(BaseOptions):
 		self.parser.add_argument('--learning_rate_decrease_itr', type=int, default=-1, help='how often is the learning rate decreased by six percent')
 		self.parser.add_argument('--decay_factor', type=float, default=0.94, help='learning rate decay factor')
 		self.parser.add_argument('--validation_on', action='store_true', help='whether to test on validation set during training')
-		self.parser.add_argument('--validation_freq', type=int, default=400, help='frequency of testing on validation set')
-		self.parser.add_argument('--epoch_save_freq', type=int, default=5, help='frequency of saving intermediate models')
+		self.parser.add_argument('--validation_freq', type=int, default=20, help='frequency of testing on validation set')
+		self.parser.add_argument('--epoch_save_freq', type=int, default=50, help='frequency of saving intermediate models')
 
 		#model arguments
 		self.parser.add_argument('--init_material_weight', type=str, default= '', help='path to the pre-trained material net')

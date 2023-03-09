@@ -19,6 +19,15 @@ def unet_upconv(input_nc, output_nc, outermost=False, norm_layer=nn.BatchNorm2d)
     else:
         return nn.Sequential(*[upconv, nn.Sigmoid()])
 
+def unet_upconv2(input_nc, output_nc, kernel_size=4, stride=2, padding=1, outermost=False, norm_layer=nn.BatchNorm2d):
+    upconv = nn.ConvTranspose2d(input_nc, output_nc, kernel_size=kernel_size, stride=stride, padding=padding)
+    uprelu = nn.ReLU(True)
+    upnorm = norm_layer(output_nc)
+    if not outermost:
+        return nn.Sequential(*[upconv, upnorm, uprelu])
+    else:
+        return nn.Sequential(*[upconv, nn.Sigmoid()])
+
         
 def create_conv(input_channels, output_channels, kernel, paddings, batch_norm=True, Relu=True, stride=1):
     model = [nn.Conv2d(input_channels, output_channels, kernel, stride = stride, padding = paddings)]
@@ -155,6 +164,299 @@ class attentionNet(nn.Module):
         attention = self.upconvlayer5(upconv4feature)
         return attention, audioVisual_feature
 
+class attentionDecoderNet(nn.Module):
+    def __init__(self, att_out_nc, input_nc):
+        super(attentionDecoderNet, self).__init__()
+        #initialize layers
+        
+
+        self.upconvlayer1 = unet_upconv(input_nc, 512) 
+        self.upconvlayer2 = unet_upconv(512, 256)
+        self.upconvlayer3 = unet_upconv(256, 128)
+        self.upconvlayer4 = unet_upconv(128, 64)
+        self.upconvlayer5 = unet_upconv(64, 32)
+        self.upconvlayer6 = unet_upconv(32, 16)
+        self.upconvlayer7 = unet_upconv(16, 8)
+        self.upconvlayer8 = unet_upconv2(8, 4, kernel_size=[5,41], stride=[2,1], padding=1)
+        self.upconvlayer9 = unet_upconv2(4, 2, kernel_size=3, stride=1, padding=1, outermost=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
+        
+    def forward(self, rgb_feat, echo_feat, mat_feat): #audio_shape=[2,257,166]
+        #rgb_feat = rgb_feat.permute(0, 2, 3, 1).contiguous()
+        #echo_feat = echo_feat.permute(0, 2, 3, 1).contiguous()
+        #mat_feat = mat_feat.permute(0, 2, 3, 1).contiguous()
+        
+        #material_feat = mat_feat.reshape((mat_feat.shape[0],-1)).unsqueeze(0)
+        #audio_feat = echo_feat.reshape((echo_feat.shape[0],-1)).unsqueeze(0)
+        #img_feat = rgb_feat.reshape((rgb_feat.shape[0],-1)).unsqueeze(0)
+        
+        rgb_feat = rgb_feat.squeeze(-1).squeeze(-1).unsqueeze(0)
+        echo_feat = echo_feat.squeeze(-1).squeeze(-1).unsqueeze(0)
+        mat_feat = mat_feat.unsqueeze(0)
+        
+        src = torch.cat([rgb_feat,echo_feat,mat_feat],dim=0)
+        out = self.transformer_encoder(src)
+        #out = torch.cat([out[0:16],out[16:32],out[32:]],dim=-1)
+        
+        #attentionImg = self.attention_img(rgb_feat, echo_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+    
+        #attentionImg = attentionImg.permute(0, 3, 1, 2).contiguous()
+        #attentionMat = attentionMat.permute(0, 3, 1, 2).contiguous()
+        
+        #audioVisual_feature = out.unsqueeze(-1).unsqueeze(-1) #torch.cat((attentionImg, attentionMat), dim=1)
+        #audioVisual_feature = out.reshape((out.shape[0],out.shape[1],mat_feat.shape[1],mat_feat.shape[2],mat_feat.shape[3]))
+        audioVisual_feature = out
+        audioVisual_feature = torch.cat([audioVisual_feature[0],audioVisual_feature[1]],dim=1).unsqueeze(-1).unsqueeze(-1)
+        
+        upconv1feature = self.upconvlayer1(audioVisual_feature)
+        upconv2feature = self.upconvlayer2(upconv1feature)
+        upconv3feature = self.upconvlayer3(upconv2feature)
+        upconv4feature = self.upconvlayer4(upconv3feature)
+        upconv5feature = self.upconvlayer5(upconv4feature)
+        upconv6feature = self.upconvlayer6(upconv5feature)
+        upconv7feature = self.upconvlayer7(upconv6feature)
+        upconv8feature = self.upconvlayer8(upconv7feature)
+        attention = self.upconvlayer9(upconv8feature)
+        #attention = self.upconvlayer7(upconv9feature)
+        return attention, audioVisual_feature
+
+
+class attentionSpecNet(nn.Module):
+    def __init__(self, att_out_nc, input_nc):
+        super(attentionSpecNet, self).__init__()
+        #initialize layers
+        
+        self.attention_img = nn.Bilinear(512, 512, att_out_nc)
+        self.attention_material = nn.Bilinear(512, 512, att_out_nc)
+        self.upconvlayer1 = unet_upconv(input_nc, 512) 
+        self.upconvlayer2 = unet_upconv(512, 256)
+        self.upconvlayer3 = unet_upconv(256, 128)
+
+        """
+        self.rgbdepth_upconvlayer4 = unet_upconv2(ngf * 4, ngf, kernel_size=[4,8], stride=[2,1], padding=1) #unet_upconv(ngf * 4, ngf)
+        self.rgbdepth_upconvlayer5 = unet_upconv2(ngf, ngf//2, kernel_size=[4,8], stride=[1,1], padding=1)  #unet_upconv(ngf * 2, ngf)
+        self.rgbdepth_upconvlayer6 = unet_upconv2(ngf//2, ngf//4, kernel_size=3, stride=1, padding=1)
+        self.rgbdepth_upconvlayer7 = unet_upconv2(ngf//4, output_nc, kernel_size=3, stride=1, padding=1, outermost=True)
+        """
+        self.upconvlayer4 = unet_upconv(128, 64) #unet_upconv(128, 64)
+        self.upconvlayer5 = unet_upconv2(64, 32, kernel_size=[4,6], stride=[2,2], padding=1) #unet_upconv(64, 32)
+        """
+        self.rgbdepth_upconvlayer4 = unet_upconv2(ngf * 4, ngf, kernel_size=[4,6], stride=[2,1], padding=1) #unet_upconv(ngf * 4, ngf)
+        self.rgbdepth_upconvlayer5 = unet_upconv2(ngf, ngf//2, kernel_size=[4,6], stride=[2,1], padding=1)  #unet_upconv(ngf * 2, ngf)
+        self.rgbdepth_upconvlayer6 = unet_upconv2(ngf//2, ngf//4, kernel_size=[4,8], stride=[2,1], padding=1)
+        """
+        self.upconvlayer6 = unet_upconv2(32, 16, kernel_size=[4,6], stride=[2,1], padding=1)
+        self.upconvlayer7 = unet_upconv2(16, 8, kernel_size=[4,6], stride=[2,1], padding=1)
+        self.upconvlayer8 = unet_upconv2(8, 1, kernel_size=[4,6], stride=[2,1], padding=1,outermost=True)
+        #self.upconvlayer5 = unet_upconv(64, 1, True)
+        
+    def forward(self, rgb_feat, echo_feat, mat_feat):
+        rgb_feat = rgb_feat.permute(0, 2, 3, 1).contiguous()
+        echo_feat = echo_feat.permute(0, 2, 3, 1).contiguous()
+        mat_feat = mat_feat.permute(0, 2, 3, 1).contiguous()
+        
+        attentionImg = self.attention_img(rgb_feat, echo_feat)
+        attentionMat = self.attention_material(mat_feat, echo_feat)
+        #attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+    
+        attentionImg = attentionImg.permute(0, 3, 1, 2).contiguous()
+        attentionMat = attentionMat.permute(0, 3, 1, 2).contiguous()
+        
+        audioVisual_feature = torch.cat((attentionImg, attentionMat), dim=1)
+        #shape: (2, 256, 43)
+        upconv1feature = self.upconvlayer1(audioVisual_feature)
+        upconv2feature = self.upconvlayer2(upconv1feature)
+        upconv3feature = self.upconvlayer3(upconv2feature)
+        upconv4feature = self.upconvlayer4(upconv3feature)
+        upconv5feature = self.upconvlayer5(upconv4feature)
+        upconv6feature = self.upconvlayer6(upconv5feature)
+        upconv7feature = self.upconvlayer7(upconv6feature)
+        attention = self.upconvlayer8(upconv7feature)
+        return attention, audioVisual_feature
+
+
+class attentionTensformerEncoderSpecNet(nn.Module):
+    def __init__(self, att_out_nc, input_nc):
+        super(attentionTensformerEncoderSpecNet, self).__init__()
+        #initialize layers
+        
+        self.attention_img = nn.Bilinear(512, 512, att_out_nc)
+        self.attention_material = nn.Bilinear(512, 512, att_out_nc)
+        self.upconvlayer1 = unet_upconv(input_nc, 512) 
+        self.upconvlayer2 = unet_upconv(512, 256)
+        self.upconvlayer3 = unet_upconv(256, 128)
+
+        """
+        self.rgbdepth_upconvlayer4 = unet_upconv2(ngf * 4, ngf, kernel_size=[4,8], stride=[2,1], padding=1) #unet_upconv(ngf * 4, ngf)
+        self.rgbdepth_upconvlayer5 = unet_upconv2(ngf, ngf//2, kernel_size=[4,8], stride=[1,1], padding=1)  #unet_upconv(ngf * 2, ngf)
+        self.rgbdepth_upconvlayer6 = unet_upconv2(ngf//2, ngf//4, kernel_size=3, stride=1, padding=1)
+        self.rgbdepth_upconvlayer7 = unet_upconv2(ngf//4, output_nc, kernel_size=3, stride=1, padding=1, outermost=True)
+        """
+        self.upconvlayer4 = unet_upconv(128, 64) #unet_upconv(128, 64)
+        self.upconvlayer5 = unet_upconv2(64, 32, kernel_size=[4,4], stride=[2,2], padding=1) #unet_upconv(64, 32)
+        """
+        self.rgbdepth_upconvlayer4 = unet_upconv2(ngf * 4, ngf, kernel_size=[4,6], stride=[2,1], padding=1) #unet_upconv(ngf * 4, ngf)
+        self.rgbdepth_upconvlayer5 = unet_upconv2(ngf, ngf//2, kernel_size=[4,6], stride=[2,1], padding=1)  #unet_upconv(ngf * 2, ngf)
+        self.rgbdepth_upconvlayer6 = unet_upconv2(ngf//2, ngf//4, kernel_size=[4,8], stride=[2,1], padding=1)
+        """
+        self.upconvlayer6 = unet_upconv2(32, 32, kernel_size=[4,4], stride=[2,2], padding=1)
+        self.upconvlayer7 = unet_upconv2(32, 16, kernel_size=[4,4], stride=[2,1], padding=1)
+        self.upconvlayer8 = unet_upconv2(16, 16, kernel_size=[4,4], stride=[2,1], padding=1)
+        self.upconvlayer9 = unet_upconv2(16, 2, kernel_size=[4,4], stride=[1,1], padding=1,outermost=True)
+        #self.upconvlayer5 = unet_upconv(64, 1, True)
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
+      
+        
+    def forward(self, rgb_feat, echo_feat, mat_feat):
+        rgb_feat = rgb_feat.permute(0, 2, 3, 1).contiguous()
+        echo_feat = echo_feat.permute(0, 2, 3, 1).contiguous()
+        mat_feat = mat_feat.permute(0, 2, 3, 1).contiguous()
+
+        
+        rgb_feat = rgb_feat.squeeze(-2).squeeze(-2).unsqueeze(0)
+        echo_feat = echo_feat.squeeze(-2).squeeze(-2).unsqueeze(0)
+        mat_feat = mat_feat.squeeze(-2).squeeze(-2).unsqueeze(0)
+        """
+        
+        ###########
+        attentionImg = self.attention_img(rgb_feat, echo_feat)
+        attentionMat = self.attention_material(mat_feat, echo_feat)
+        #attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+    
+        attentionImg = attentionImg.permute(0, 3, 1, 2).contiguous()
+        attentionMat = attentionMat.permute(0, 3, 1, 2).contiguous()
+        
+        audioVisual_feature = torch.cat((attentionImg, attentionMat), dim=1)
+        #############
+        """
+
+        
+        src = torch.cat([rgb_feat,echo_feat,mat_feat],dim=0)
+        #out = self.transformer_encoder(src)
+        #audioVisual_feature = out
+        audioVisual_feature = src
+
+        """
+        attentionImg = self.attention_img(rgb_feat, echo_feat)
+        attentionMat = self.attention_material(mat_feat, echo_feat)
+        #attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+    
+        attentionImg = attentionImg.permute(0, 3, 1, 2).contiguous()
+        attentionMat = attentionMat.permute(0, 3, 1, 2).contiguous()
+        
+        audioVisual_feature = torch.cat((attentionImg, attentionMat), dim=1)
+        
+        
+        #audioVisual_feature = torch.cat([audioVisual_feature[0],audioVisual_feature[1],audioVisual_feature[2]],dim=1).unsqueeze(-1).unsqueeze(-1) #audioVisual_feature[1].unsqueeze(-1).unsqueeze(-1) #torch.cat([audioVisual_feature[0],audioVisual_feature[1]],dim=1).unsqueeze(-1).unsqueeze(-1)
+        audioVisual_feature = torch.cat([audioVisual_feature[2]],dim=1).unsqueeze(-1).unsqueeze(-1)
+        """
+
+        audioVisual_feature = torch.cat([audioVisual_feature[0],audioVisual_feature[1],audioVisual_feature[2]],dim=1).unsqueeze(-1).unsqueeze(-1)
+
+        #shape: (2, 256, 43) -> shape: (2, 256, 162) -> shape: (2, 257, 72)
+        upconv1feature = self.upconvlayer1(audioVisual_feature) # -> torch.Size([128, 512, 2, 2])
+        upconv2feature = self.upconvlayer2(upconv1feature) # -> torch.Size([128, 256, 4, 4])
+        upconv3feature = self.upconvlayer3(upconv2feature) # -> torch.Size([128, 128, 8, 8])
+        upconv4feature = self.upconvlayer4(upconv3feature) # -> torch.Size([128, 64, 16, 16])
+        upconv5feature = self.upconvlayer5(upconv4feature) #-> torch.Size([128, 32, 32, 34])
+        upconv6feature = self.upconvlayer6(upconv5feature)
+        upconv7feature = self.upconvlayer7(upconv6feature)
+        upconv8feature = self.upconvlayer8(upconv7feature)
+        attention = self.upconvlayer9(upconv8feature)
+        return attention, audioVisual_feature
+
+
+class attentionRGBSpecNet(nn.Module):
+    def __init__(self, att_out_nc, input_nc):
+        super(attentionRGBSpecNet, self).__init__()
+        #initialize layers
+        
+        self.attention_img = nn.Bilinear(512, 512, att_out_nc)
+        #self.attention_material = nn.Bilinear(512, 512, att_out_nc)
+        self.upconvlayer1 = unet_upconv(input_nc, 512) 
+        self.upconvlayer2 = unet_upconv(512, 256)
+        self.upconvlayer3 = unet_upconv(256, 128)
+        self.upconvlayer4 = unet_upconv(128, 64)
+        self.upconvlayer5 = unet_upconv(64, 32)
+        self.upconvlayer6 = unet_upconv2(32, 16, kernel_size=[5,41], stride=[2,1], padding=1)
+        self.upconvlayer7 = unet_upconv2(16, 1, kernel_size=3, stride=1, padding=1, outermost=True)
+        #self.upconvlayer5 = unet_upconv(64, 1, True)
+        
+    def forward(self, rgb_feat, mat_feat):
+        rgb_feat = rgb_feat.permute(0, 2, 3, 1).contiguous()
+        #echo_feat = echo_feat.permute(0, 2, 3, 1).contiguous()
+        mat_feat = mat_feat.permute(0, 2, 3, 1).contiguous()
+        
+        attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+        #attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+    
+        attentionImg = attentionImg.permute(0, 3, 1, 2).contiguous()
+        #attentionMat = attentionMat.permute(0, 3, 1, 2).contiguous()
+        
+        #audioVisual_feature = torch.cat((attentionImg, attentionMat), dim=1)
+        audioVisual_feature = attentionImg
+        
+        upconv1feature = self.upconvlayer1(audioVisual_feature)
+        upconv2feature = self.upconvlayer2(upconv1feature)
+        upconv3feature = self.upconvlayer3(upconv2feature)
+        upconv4feature = self.upconvlayer4(upconv3feature)
+        upconv5feature = self.upconvlayer5(upconv4feature)
+        upconv6feature = self.upconvlayer6(upconv5feature)
+        attention = self.upconvlayer7(upconv6feature)
+        return attention, audioVisual_feature
+
+
+class attentionDepthSpecNet(nn.Module):
+    def __init__(self, att_out_nc, input_nc):
+        super(attentionDepthSpecNet, self).__init__()
+        #initialize layers
+        
+        self.attention_img = nn.Bilinear(512, 512, att_out_nc)
+        #self.attention_material = nn.Bilinear(512, 512, att_out_nc)
+        self.upconvlayer1 = unet_upconv(input_nc, 512) 
+        self.upconvlayer2 = unet_upconv(512, 256)
+        self.upconvlayer3 = unet_upconv(256, 128)
+        self.upconvlayer4 = unet_upconv(128, 64)
+        self.upconvlayer5 = unet_upconv(64, 32)
+        self.upconvlayer6 = unet_upconv2(32, 16, kernel_size=[5,41], stride=[2,1], padding=1)
+        self.upconvlayer7 = unet_upconv2(16, 1, kernel_size=3, stride=1, padding=1, outermost=True)
+        #self.upconvlayer5 = unet_upconv(64, 1, True)
+        
+    def forward(self, rgb_feat, mat_feat):
+        rgb_feat = rgb_feat.permute(0, 2, 3, 1).contiguous()
+        #echo_feat = echo_feat.permute(0, 2, 3, 1).contiguous()
+        mat_feat = mat_feat.permute(0, 2, 3, 1).contiguous()
+        
+        attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+        #attentionImg = self.attention_img(rgb_feat, mat_feat)
+        #attentionMat = self.attention_material(mat_feat, echo_feat)
+    
+        attentionImg = attentionImg.permute(0, 3, 1, 2).contiguous()
+        #attentionMat = attentionMat.permute(0, 3, 1, 2).contiguous()
+        
+        #audioVisual_feature = torch.cat((attentionImg, attentionMat), dim=1)
+        audioVisual_feature = attentionImg
+        
+        upconv1feature = self.upconvlayer1(audioVisual_feature)
+        upconv2feature = self.upconvlayer2(upconv1feature)
+        upconv3feature = self.upconvlayer3(upconv2feature)
+        upconv4feature = self.upconvlayer4(upconv3feature)
+        upconv5feature = self.upconvlayer5(upconv4feature)
+        upconv6feature = self.upconvlayer6(upconv5feature)
+        attention = self.upconvlayer7(upconv6feature)
+        return attention, audioVisual_feature
+
+
 class RGBDepthNet(nn.Module):
     def __init__(self, ngf=64, input_nc=3, output_nc=1):
         super(RGBDepthNet, self).__init__()
@@ -185,6 +487,81 @@ class RGBDepthNet(nn.Module):
         depth_prediction = self.rgbdepth_upconvlayer5(torch.cat((rgbdepth_upconv4feature, rgbdepth_conv1feature), dim=1))
         return depth_prediction, rgbdepth_conv5feature
 
+
+class RGBSpecNet(nn.Module):
+    def __init__(self, ngf=64, input_nc=3, output_nc=1):
+        super(RGBSpecNet, self).__init__()
+        #initialize layers
+        self.rgbdepth_convlayer1 = unet_conv(input_nc, ngf)
+        self.rgbdepth_convlayer2 = unet_conv(ngf, ngf * 2)
+        self.rgbdepth_convlayer3 = unet_conv(ngf * 2, ngf * 4)
+        self.rgbdepth_convlayer4 = unet_conv(ngf * 4, ngf * 8)
+        self.rgbdepth_convlayer5 = unet_conv(ngf * 8, ngf * 8)
+        self.rgbdepth_upconvlayer1 = unet_upconv(512, ngf * 8)
+        self.rgbdepth_upconvlayer2 = unet_upconv(ngf * 16, ngf *4)
+        self.rgbdepth_upconvlayer3 = unet_upconv(ngf * 8, ngf * 2)
+        self.rgbdepth_upconvlayer4 = unet_upconv2(ngf * 4, ngf, kernel_size=[4,6], stride=[2,1], padding=1) #unet_upconv(ngf * 4, ngf)
+        self.rgbdepth_upconvlayer5 = unet_upconv2(ngf, ngf//2, kernel_size=[4,6], stride=[2,1], padding=1)  #unet_upconv(ngf * 2, ngf)
+        self.rgbdepth_upconvlayer6 = unet_upconv2(ngf//2, ngf//4, kernel_size=[4,8], stride=[2,1], padding=1)
+        self.rgbdepth_upconvlayer7 = unet_upconv2(ngf//4, output_nc, kernel_size=3, stride=1, padding=1, outermost=True)
+        #self.conv1x1 = create_conv(512, 8, 1, 0) #reduce dimension of extracted visual features
+        self.conv1x1 = unet_conv(ngf * 8, ngf * 8) #reduce dimension of extracted visual features
+        self.conv1x1_2 = unet_conv(ngf * 8, ngf * 8)
+
+    def forward(self, x):
+        rgbdepth_conv1feature = self.rgbdepth_convlayer1(x) #  torch.Size([4, 64, 64, 64])
+        rgbdepth_conv2feature = self.rgbdepth_convlayer2(rgbdepth_conv1feature) #torch.Size([4, 128, 32, 32])
+        rgbdepth_conv3feature = self.rgbdepth_convlayer3(rgbdepth_conv2feature) #torch.Size([4, 256, 16, 16])
+        rgbdepth_conv4feature = self.rgbdepth_convlayer4(rgbdepth_conv3feature) #torch.Size([4, 512, 8, 8])
+        rgbdepth_conv5feature = self.rgbdepth_convlayer5(rgbdepth_conv4feature) #torch.Size([4, 512, 4, 4])
+        rgbdepth_conv6feature = self.conv1x1(rgbdepth_conv5feature)
+        rgbdepth_conv7feature = self.conv1x1_2(rgbdepth_conv6feature)
+        #shape: (2, 256, 43)
+        rgbdepth_upconv1feature = self.rgbdepth_upconvlayer1(rgbdepth_conv5feature) #torch.Size([4, 512, 8, 8])
+        rgbdepth_upconv2feature = self.rgbdepth_upconvlayer2(torch.cat((rgbdepth_upconv1feature, rgbdepth_conv4feature), dim=1))#4,1024,8,8 - torch.Size([4, 256, 16, 16])
+        rgbdepth_upconv3feature = self.rgbdepth_upconvlayer3(torch.cat((rgbdepth_upconv2feature, rgbdepth_conv3feature), dim=1))#torch.Size([4, 128, 32, 32])
+        rgbdepth_upconv4feature = self.rgbdepth_upconvlayer4(torch.cat((rgbdepth_upconv3feature, rgbdepth_conv2feature), dim=1))#torch.Size([4, 64, 64, 64])
+        rgbdepth_upconv5feature = self.rgbdepth_upconvlayer5(rgbdepth_upconv4feature) #(torch.cat((rgbdepth_upconv4feature, rgbdepth_conv1feature), dim=1))#torch.Size([4, 2, 128, 128])
+        rgbdepth_upconv6feature = self.rgbdepth_upconvlayer6(rgbdepth_upconv5feature)
+        depth_prediction = self.rgbdepth_upconvlayer7(rgbdepth_upconv6feature)
+        return depth_prediction, rgbdepth_conv7feature
+
+
+class RGBMaterialSpecNet(nn.Module):
+    def __init__(self, ngf=64, input_nc=3, output_nc=1):
+        super(RGBMaterialSpecNet, self).__init__()
+        #initialize layers
+        self.rgbdepth_convlayer1 = unet_conv(input_nc, ngf)
+        self.rgbdepth_convlayer2 = unet_conv(ngf, ngf * 2)
+        self.rgbdepth_convlayer3 = unet_conv(ngf * 2, ngf * 4)
+        self.rgbdepth_convlayer4 = unet_conv(ngf * 4, ngf * 8)
+        self.rgbdepth_convlayer5 = unet_conv(ngf * 8, ngf * 8)
+        self.rgbdepth_upconvlayer1 = unet_upconv(512*2, ngf * 8)
+        self.rgbdepth_upconvlayer2 = unet_upconv(ngf * 16, ngf *4)
+        self.rgbdepth_upconvlayer3 = unet_upconv(ngf * 8, ngf * 2)
+        self.rgbdepth_upconvlayer4 = unet_upconv(ngf * 4, ngf)
+        self.rgbdepth_upconvlayer5 = unet_upconv(ngf * 2, ngf)
+        self.rgbdepth_upconvlayer6 = unet_upconv2(ngf, ngf//2, kernel_size=[5,41], stride=[2,1], padding=1)
+        self.rgbdepth_upconvlayer7 = unet_upconv2(ngf//2, output_nc, kernel_size=3, stride=1, padding=1, outermost=True)
+        #self.conv1x1 = create_conv(512, 8, 1, 0) #reduce dimension of extracted visual features
+
+    def forward(self, x, material_feature):
+        rgbdepth_conv1feature = self.rgbdepth_convlayer1(x) #  torch.Size([4, 64, 64, 64])
+        rgbdepth_conv2feature = self.rgbdepth_convlayer2(rgbdepth_conv1feature) #torch.Size([4, 128, 32, 32])
+        rgbdepth_conv3feature = self.rgbdepth_convlayer3(rgbdepth_conv2feature) #torch.Size([4, 256, 16, 16])
+        rgbdepth_conv4feature = self.rgbdepth_convlayer4(rgbdepth_conv3feature) #torch.Size([4, 512, 8, 8])
+        rgbdepth_conv5feature = self.rgbdepth_convlayer5(rgbdepth_conv4feature) #torch.Size([4, 512, 4, 4])
+        
+        rgbdepth_upconv1feature = self.rgbdepth_upconvlayer1(torch.cat([rgbdepth_conv5feature,material_feature],dim=1)) #torch.Size([4, 512, 8, 8])
+        rgbdepth_upconv2feature = self.rgbdepth_upconvlayer2(torch.cat((rgbdepth_upconv1feature, rgbdepth_conv4feature), dim=1))#4,1024,8,8 - torch.Size([4, 256, 16, 16])
+        rgbdepth_upconv3feature = self.rgbdepth_upconvlayer3(torch.cat((rgbdepth_upconv2feature, rgbdepth_conv3feature), dim=1))#torch.Size([4, 128, 32, 32])
+        rgbdepth_upconv4feature = self.rgbdepth_upconvlayer4(torch.cat((rgbdepth_upconv3feature, rgbdepth_conv2feature), dim=1))#torch.Size([4, 64, 64, 64])
+        rgbdepth_upconv5feature = self.rgbdepth_upconvlayer5(torch.cat((rgbdepth_upconv4feature, rgbdepth_conv1feature), dim=1))#torch.Size([4, 2, 128, 128])
+        rgbdepth_upconv6feature = self.rgbdepth_upconvlayer6(rgbdepth_upconv5feature)
+        depth_prediction = self.rgbdepth_upconvlayer7(rgbdepth_upconv6feature)
+        return depth_prediction, rgbdepth_conv5feature
+
+
 class MaterialPropertyNet(nn.Module):
     def __init__(self, nclass, backbone):
         super(MaterialPropertyNet, self).__init__()
@@ -204,6 +581,14 @@ class MaterialPropertyNet(nn.Module):
         x = self.pretrained.layer3(x)
         feat = self.pretrained.layer4(x)
         x = self.pool(feat)
-        x = x.view(-1, 512)
-        x = self.fc(x)
-        return x, feat
+        feat2 = x.view(-1, 512)
+        x = self.fc(feat2)
+        return x, feat2
+
+if __name__ == "__main__":
+    input_ = torch.rand((4,3,128,128)) #torch.Size([256, 2, 257, 166])
+    model = RGBSpecNet(input_nc=3, output_nc=2)
+    out = model(input_)
+    print(out[0].shape)
+    print(out[1].shape)
+    

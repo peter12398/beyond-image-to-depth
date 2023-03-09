@@ -17,8 +17,8 @@ class BaseOptions():
 		self.parser.add_argument('--checkpoints_dir', type=str, default= '', help='path to save checkpoints')
 		self.parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
 		self.parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
-		self.parser.add_argument('--nThreads', default=8, type=int, help='# threads for loading data')
-		self.parser.add_argument('--audio_length', default=0.06, type=float, help='audio length, default 0.06s')
+		self.parser.add_argument('--nThreads', default=0, type=int, help='# threads for loading data')
+		self.parser.add_argument('--audio_length', default=0.093, type=float, help='audio length, default 0.06s')
 		self.parser.add_argument('--audio_normalize', type=bool, default=False, help='whether to normalize the audio')
 		self.parser.add_argument('--image_transform', type=bool, default=True, help='whether to transform the image data')
 		self.parser.add_argument('--image_resolution', default=128, type=int, help='the resolution of image for cropping')
@@ -65,7 +65,8 @@ class BaseOptions():
 			self.opt.scenes['train'] = ['apartment_0', 'apartment_1', 
 			'frl_apartment_0', 'frl_apartment_1', 'frl_apartment_2', 'frl_apartment_3',
 			'frl_apartment_4', 'office_0', 'office_1', 'office_2', 'office_3', 
-			'hotel_0', 'room_0', 'room_1', 'room_2']
+			'hotel_0']
+			self.opt.scenes['val'] = ['room_0', 'room_1', 'room_2']
 			self.opt.scenes['test'] = ['apartment_2', 'frl_apartment_5', 'office_4']
 			
 
